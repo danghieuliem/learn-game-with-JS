@@ -69,10 +69,58 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  class Explosion {
+    constructor(x, y, game, size = 1) {
+      /** @type {Game} */
+      this.game = game
+      this.image = new Image()
+      this.image.src = './assets/smoke.png'
+      this.spriteWidth = 200
+      this.spriteHeight = 179
+      this.size = size
+      this.x = x
+      this.y = y
+      this.frame = 0
+      this.sound = new Audio()
+      this.sound.src = './assets/explosion.wav'
+      this.timeSinceLastFrame = 0
+      this.frameInterval = 120
+      this.markedForDeletion = false
+      this.angle = Math.random() * 6.2
+    }
+
+    update(deltaTime) {
+      if (this.frame === 0) this.sound.play()
+      this.timeSinceLastFrame += deltaTime
+      if (this.timeSinceLastFrame > this.frameInterval) {
+        this.frame++
+        this.timeSinceLastFrame = 0
+        if (this.frame > 5) this.markedForDeletion = true
+      }
+    }
+
+    draw() {
+      const { image, frame, spriteWidth, spriteHeight, x, y, size } = this
+      this.game.ctx.drawImage(
+        image,
+        frame * spriteWidth,
+        0,
+        spriteWidth,
+        spriteHeight,
+        x,
+        y - size / 4,
+        size,
+        size
+      )
+    }
+  }
+
   class Game {
     constructor(ctx, collisionCtx, width, height) {
       /** @type {Enemy[]} */
       this.enemies = []
+      /** @type {Explosion[]} */
+      this.explosions = []
       /** @type {CanvasRenderingContext2D} */
       this.ctx = ctx
       /** @type {CanvasRenderingContext2D} */
@@ -82,6 +130,14 @@ document.addEventListener('DOMContentLoaded', () => {
       this.enemyInterval = 500
       this.enemyTimer = 0
       this.enemyType = ['worm', 'ghost', 'spider']
+      this.power = 0
+      this.powerFull = 10
+      this.kill = 0
+      this.miss = 0
+      this.shootTime = 0
+      this.shootMiss = 0
+      this.missingShootSound = new Audio()
+      this.missingShootSound.src = './assets/missingShoot.wav'
     }
     update(deltaTime) {
       this.enemies = this.enemies.filter((ob) => !ob.markedForDeletion)
@@ -91,14 +147,85 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         this.enemyTimer += deltaTime
       }
-      this.enemies.forEach((ob) => ob.update(deltaTime))
+      ;[...this.enemies, ...this.explosions].forEach((ob) =>
+        ob.update(deltaTime)
+      )
     }
     draw() {
-      this.enemies.forEach((ob) => ob.draw())
+      const {
+        ctx,
+        enemies,
+        explosions,
+        kill,
+        miss,
+        width,
+        height,
+        power,
+        powerFull,
+        shootTime,
+        shootMiss,
+      } = this
+      ;[...enemies, ...explosions].forEach((ob) => ob.draw())
+      ctx.save()
+      ctx.font = '25px impact'
+      ctx.fillStyle = 'gray'
+      ctx.fillText('Kill: ' + kill, 20, 50)
+      ctx.fillText('Miss: ' + miss, 20, 80)
+      ctx.fillText(
+        'Accurate: ' +
+          (100 - (shootMiss / shootTime) * 100 || 0).toFixed(2) +
+          '%',
+        20,
+        110
+      )
+
+      ctx.fillStyle = 'white'
+      ctx.fillText('Kill: ' + kill, 22, 52)
+      ctx.fillText('Miss: ' + miss, 22, 82)
+      ctx.fillText(
+        'Accurate: ' +
+          (100 - (shootMiss / shootTime) * 100 || 0).toFixed(2) +
+          '%',
+        22,
+        112
+      )
+
+      ctx.strokeStyle = 'white'
+      ctx.strokeRect(20, height - 40, width - 40, 20)
+      ctx.fillRect(
+        20,
+        height - 40,
+        Math.min(((width - 40) * power) / powerFull, width - 40),
+        20
+      )
+
+      ctx.fillStyle = 'gray'
+      ctx.textAlign = 'center'
+      ctx.font = '16px impact'
+      if (powerFull <= power)
+        ctx.fillText('press space', width / 2, height - 25)
+
+      ctx.restore()
     }
-    handleShort(x, y) {
+
+    usePower() {
+      if (this.powerFull > this.power) return
+      this.kill += this.enemies.length
+      this.explosions.push(
+        new Explosion(0, this.height / 2 - this.width / 2, this, this.width)
+      )
+      this.enemies = []
+      this.power = 0
+    }
+
+    handleShoot(x, y) {
+      this.shootTime++
       const pc = [...this.collisionCtx.getImageData(x, y, 1, 1).data]
-      if (pc.every((i) => !i)) return
+      if (pc.every((i) => !i)) {
+        this.missingShootSound.play()
+        this.shootMiss++
+        return
+      }
       this.enemies.forEach((object) => {
         if (
           object.randomColor[0] !== pc[0] ||
@@ -107,8 +234,14 @@ document.addEventListener('DOMContentLoaded', () => {
         )
           return
         object.markedForDeletion = true
+        this.explosions.push(
+          new Explosion(object.x, object.y, this, object.width)
+        )
+        this.kill++
+        this.power++
       })
     }
+
     #addNewEnemy() {
       const randomEnemy =
         this.enemyType[Math.floor(Math.random() * this.enemyType.length)]
@@ -126,8 +259,6 @@ document.addEventListener('DOMContentLoaded', () => {
         default:
           this.enemies.push(new Worm(this))
       }
-
-      // this.enemies.sort((a, b) => a.y - b.y)
     }
   }
 
@@ -153,7 +284,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     update(deltaTime) {
       this.x -= this.vx * deltaTime
-      if (this.x < 0 - this.width) this.markedForDeletion = true
+      if (this.x < 0 - this.width) {
+        this.markedForDeletion = true
+        this.game.miss++
+      }
       if (this.frameTimer > this.frameInterval) {
         if (this.frameX < this.maxFrame) this.frameX++
         else this.frameX = 0
@@ -192,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
       this.width = this.spriteWidth / 2
       this.height = this.spriteHeight / 2
       this.x = this.game.width
-      this.y = this.game.height - this.height
+      this.y = this.game.height - this.height - 50
       this.vx = Math.random() * 0.1 + 0.1
     }
   }
@@ -242,11 +376,17 @@ document.addEventListener('DOMContentLoaded', () => {
       this.y = 0 - this.height
       this.vx = 0
       this.vy = Math.random() * 0.1 + 0.1
-      this.maxLength = Math.random() * this.game.height
+      this.maxLength = Math.max(
+        Math.random() * this.game.height,
+        this.width * 2.5
+      )
     }
     update(deltaTime) {
       super.update(deltaTime)
-      if (this.y < 0 - this.height * 2) this.markedForDeletion = true
+      if (this.y < 0 - this.height * 2) {
+        this.markedForDeletion = true
+        this.game.miss++
+      }
       this.y += this.vy * deltaTime
       if (this.y > this.maxLength) this.vy *= -1
     }
@@ -269,14 +409,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const tg = new Target()
 
   document.addEventListener('click', (e) => {
-    game.handleShort(e.x, e.y)
+    game.handleShoot(e.x, e.y)
   })
-  window.addEventListener('mousemove', (e) => {
+
+  document.addEventListener('mousemove', (e) => {
     tg.update(e.x, e.y)
   })
 
-  targetCtx.fillStyle = 'red'
-  targetCtx.fillRect(0, 0, 300, 300)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === ' ') {
+      game.usePower()
+    }
+  })
 
   // Render background image
   const image = new Image()

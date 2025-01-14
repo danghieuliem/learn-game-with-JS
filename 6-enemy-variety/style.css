@@ -1,0 +1,22 @@
+body {
+  background-color: black;
+  cursor: none;
+}
+
+#backgroundCanvas,
+#collisionCanvas,
+#mainCanvas,
+#targetCanvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#collisionCanvas {
+  opacity: 0;
+}
+
+img {
+  display: none;
+}
